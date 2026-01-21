@@ -4,13 +4,12 @@ import java.util.Scanner;
 
 public class ClienteArchivos {
     private Socket socket;
-
-    // Para recibir respuestas del servidor
     private BufferedReader entrada;
-    // Para enviar comandos al servidor
     private PrintWriter salida;
-
     private Scanner sc;
+
+    // Variable para saber si hay un archivo abierto
+    private String archivoActual = null;
 
     public static void main(String[] args) {
         ClienteArchivos cliente = new ClienteArchivos();
@@ -20,7 +19,7 @@ public class ClienteArchivos {
     public void iniciar() {
         sc = new Scanner(System.in);
 
-        System.out.println("╔══• CLIENTE DE ARCHIVOS •══╗\n");
+        System.out.println("*** CLIENTES DE ARCHIVOS ***");
 
         System.out.print("IP del servidor: ");
         String ip = sc.nextLine();
@@ -32,14 +31,14 @@ public class ClienteArchivos {
         try {
             System.out.println("\nConectando a " + ip + "...");
 
-            // Socket crea la conexión al servidor (IP y puerto)
+            // Socket creamos la conexión al servidor (IP y puerto)
             socket = new Socket(ip, 5000);
 
-            // Configurar canales de comunicación
+            // Configuramos canales de comunicación
             entrada = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             salida = new PrintWriter(socket.getOutputStream(), true);
 
-            // Leer mensaje de bienvenida del servidor
+            // Leemos mensaje de bienvenida del servidor
             System.out.println(entrada.readLine());
             System.out.println("CONECTADO!\n");
 
@@ -55,75 +54,132 @@ public class ClienteArchivos {
     }
 
     private void menu() {
-        // Ciclo principal del menú
         while (true) {
-            System.out.println("\n===== MENU =====");
-            System.out.println("1. CONNECT");
-            System.out.println("2. OPEN");
-            System.out.println("3. WRITE");
-            System.out.println("4. READ");
-            System.out.println("5. CLOSE");
-            System.out.println("6. DISCONNECT");
-            System.out.println("================");
-            System.out.print("Opción: ");
-
-            String opcion = sc.nextLine();
-
-            try {
-                switch (opcion) {
-                    case "1":
-                        enviar("CONNECT");
-                        break;
-
-                    case "2":
-                        System.out.print("Nombre del archivo: ");
-                        String archivo = sc.nextLine();
-                        enviar("OPEN " + archivo);
-                        break;
-
-                    case "3":
-                        System.out.print("Archivo: ");
-                        String archivoW = sc.nextLine();
-                        System.out.print("Contenido: ");
-                        String contenido = sc.nextLine();
-                        enviar("WRITE " + archivoW + "|" + contenido);
-                        break;
-
-                    case "4":
-                        System.out.print("Archivo a leer: ");
-                        String archivoR = sc.nextLine();
-                        leerArchivo(archivoR);
-                        break;
-
-                    case "5":
-                        System.out.print("Archivo a cerrar: ");
-                        String archivoC = sc.nextLine();
-                        enviar("CLOSE " + archivoC);
-                        break;
-
-                    case "6":
-                        enviar("DISCONNECT");
-                        System.out.println("Desconectado");
-                        socket.close();
-                        return;
-
-                    default:
-                        System.out.println("Opción no válida");
-                }
-            } catch (Exception e) {
-                System.out.println("Error: " + e.getMessage());
+            // Mostramos menú diferente según si hay archivo abierto o no
+            if (archivoActual == null) {
+                menuSinArchivo();
+            } else {
+                menuConArchivo();
             }
         }
     }
 
-    // Función envíar comando y mostrar respuesta
+    // Menú cuando NO hay archivo abierto
+    private void menuSinArchivo() {
+        System.out.println("\n===== MENU PRINCIPAL =====");
+        System.out.println("1. CONNECT    - Verificar conexión");
+        System.out.println("2. OPEN       - Abrir archivo");
+        System.out.println("3. DISCONNECT - Salir");
+        System.out.println("==========================");
+        System.out.print("Opción: ");
+
+        String opcion = sc.nextLine();
+
+        try {
+            switch (opcion) {
+                case "1":
+                    enviar("CONNECT");
+                    break;
+
+                case "2":
+                    abrirArchivo();
+                    break;
+
+                case "3":
+                    enviar("DISCONNECT");
+                    System.out.println("Desconectado");
+                    socket.close();
+                    System.exit(0);
+                    break;
+
+                default:
+                    System.out.println("Opción no válida");
+            }
+        } catch (Exception e) {
+            System.out.println("Error: " + e.getMessage());
+        }
+    }
+
+    // Menú cuando SÍ hay archivo abierto
+    private void menuConArchivo() {
+        System.out.println("\n===== ARCHIVO ABIERTO: " + archivoActual + " =====");
+        System.out.println("1. WRITE - Escribir en el archivo");
+        System.out.println("2. READ  - Leer el archivo");
+        System.out.println("3. CLOSE - Cerrar el archivo");
+        System.out.println("=========================================");
+        System.out.print("Opción: ");
+
+        String opcion = sc.nextLine();
+
+        try {
+            switch (opcion) {
+                case "1":
+                    escribirArchivo();
+                    break;
+
+                case "2":
+                    leerArchivo(archivoActual);
+                    break;
+
+                case "3":
+                    cerrarArchivo();
+                    break;
+
+                default:
+                    System.out.println("Opción no válida");
+            }
+        } catch (Exception e) {
+            System.out.println("Error: " + e.getMessage());
+        }
+    }
+
+    // Método para abrir archivo
+    private void abrirArchivo() throws Exception {
+        System.out.print("- Nombre del archivo a abrir: ");
+        String archivo = sc.nextLine();
+
+        salida.println("OPEN " + archivo);
+        String respuesta = entrada.readLine();
+        System.out.println("Servidor: " + respuesta);
+
+        // Si se abrió correctamente guardamos el nombre
+        if (respuesta.startsWith("OK")) {
+            archivoActual = archivo;
+            System.out.println("\n¡Archivo abierto! Ahora puedes leer ó escribir :D");
+        }
+    }
+
+    // Método para escribir
+    private void escribirArchivo() throws Exception {
+        System.out.print("- Contenido a escribir: ");
+        String contenido = sc.nextLine();
+
+        salida.println("WRITE " + archivoActual + "|" + contenido);
+        String respuesta = entrada.readLine();
+        System.out.println("Servidor: " + respuesta);
+    }
+
+    // Método para cerrar archivo
+    private void cerrarArchivo() throws Exception {
+        salida.println("CLOSE " + archivoActual);
+        String respuesta = entrada.readLine();
+        System.out.println("Servidor: " + respuesta);
+
+        // Si se cerró correctamente limpiamos la variable
+        if (respuesta.startsWith("OK")) {
+            System.out.println("Volviendo al menú principal...");
+            archivoActual = null;
+        }
+    }
+
+    // Enviar comando y mostrar respuesta
     private void enviar(String comando) throws Exception {
         salida.println(comando);
         String respuesta = entrada.readLine();
         System.out.println("Servidor: " + respuesta);
     }
 
-    // Función especial para leer archivos (maneja múltiples líneas)
+    // Leer archivos
     private void leerArchivo(String archivo) throws Exception {
         salida.println("READ " + archivo);
         String linea;
@@ -131,9 +187,9 @@ public class ClienteArchivos {
         // Leer hasta encontrar el marcador "FIN"
         while ((linea = entrada.readLine()) != null) {
             if (linea.equals("INICIO")) {
-                System.out.println("\n--- Contenido del archivo ---");
+                System.out.println("\n|=== " + archivo + " ===|");
             } else if (linea.equals("FIN")) {
-                System.out.println("--- Fin ---");
+                System.out.println("|===---===|");
                 break;
             } else {
                 System.out.println(linea);

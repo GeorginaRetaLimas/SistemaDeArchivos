@@ -1,37 +1,36 @@
 import java.io.*;
 import java.net.*;
+import java.util.HashMap;
 
 public class ServidorArchivo {
     // Puerto donde el servidor escuchará conexiones
     private static final int PUERTO = 5000;
 
     public static void main(String[] args) {
-        System.out.println("=== SERVIDOR DE ARCHIVOS (SIN HILOS) ===");
-        System.out.println("NOTA: Solo puede atender UN cliente a la vez\n");
+        System.out.println("*** SERVIDOR DE ARCHIVOS ***");
         System.out.println("Iniciando servidor...\n");
 
         try {
-            // Crear el servidor en el puerto especificado
+            // Creamos el servidor en el puerto especificado
             ServerSocket servidor = new ServerSocket(PUERTO);
 
-            // Obtener la IP de esta computadora para dársela al cliente
+            // Obtenemos la IP de la lap
             String ip = InetAddress.getLocalHost().getHostAddress();
 
-            System.out.println("SERVIDOR LISTO!");
+            System.out.println("SERVIDOR LISTO <3!");
             System.out.println("IP del servidor: " + ip);
             System.out.println("Puerto: " + PUERTO);
-            System.out.println("\nDA ESTA IP AL CLIENTE: " + ip);
-            System.out.println("Esperando cliente...\n");
+            System.out.println("- Esperando cliente...\n");
 
-            // Ciclo infinito para aceptar al cliente
-            while (true) {
-                // accept() hasta que haya una señal
-                Socket cliente = servidor.accept();
-                System.out.println("Cliente conectado!");
+            Socket cliente = servidor.accept();
+            System.out.println("- ¡Cliente conectado!");
 
-                atenderCliente(cliente);
-                System.out.println("\nEsperando al cliente...\n");
-            }
+            atenderCliente(cliente);
+
+            System.out.println("\n*-*- CLIENTE DESCONECTADO -*-*");
+            System.out.println("Bye bye desde el servidor");
+            servidor.close();
+
         } catch (Exception e) {
             System.out.println("Error: " + e.getMessage());
         }
@@ -42,8 +41,11 @@ public class ServidorArchivo {
         BufferedReader entrada = null;
         PrintWriter salida = null;
 
+        // HashMap para manejar los archivos que estan abiertos
+        HashMap<String, ArchivoAbierto> archivosAbiertos = new HashMap<>();
+
         try {
-            // Configurar canales de entrada y salida
+            // Configuramos canales de entrada y salida
             entrada = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             salida = new PrintWriter(socket.getOutputStream(), true);
 
@@ -52,27 +54,36 @@ public class ServidorArchivo {
             // Leer comandos del cliente continuamente
             String comando;
             while ((comando = entrada.readLine()) != null) {
-                System.out.println("Comando recibido: " + comando);
+                System.out.println("- Comando recibido: " + comando);
 
                 // Si el cliente se desconecta, salir del ciclo
-                if (procesarComando(comando, salida, socket)) {
+                if (procesarComando(comando, salida, socket, archivosAbiertos)) {
                     break;
                 }
             }
 
-            System.out.println("Cliente desconectado");
+            System.out.println("- Cliente desconectado");
 
         } catch (Exception e) {
             System.out.println("Error atendiendo cliente: " + e.getMessage());
         } finally {
+            // Cerrar todos los archivos abiertos antes de cerrar la conexión
+            for (ArchivoAbierto arch : archivosAbiertos.values()) {
+                try {
+                    arch.cerrar();
+                } catch (Exception e) {}
+            }
+            archivosAbiertos.clear();
+
             try {
                 if (socket != null) socket.close();
             } catch (Exception e) {}
         }
     }
 
-    // Procesa comandos y retorna true si el cliente da a desonectar
-    private static boolean procesarComando(String comando, PrintWriter salida, Socket socket) {
+    // Procesa comandos y retorna true si el cliente da a desconectar
+    private static boolean procesarComando(String comando, PrintWriter salida, Socket socket,
+                                           HashMap<String, ArchivoAbierto> archivosAbiertos) {
         // Separamos el comando en acción y parámetros
         String[] partes = comando.split(" ", 2);
         String accion = partes[0].toUpperCase();
@@ -80,40 +91,59 @@ public class ServidorArchivo {
         try {
             switch (accion) {
                 case "CONNECT":
-                    salida.println("OK: Conectado al servidor");
+                    salida.println("OK: Ya estas conectado");
                     break;
 
                 case "OPEN":
                     String archivo = partes[1];
+
+                    // Verificamos si ya está abierto
+                    if (archivosAbiertos.containsKey(archivo)) {
+                        salida.println("ERROR: Archivo '" + archivo + "' ya está abierto");
+                        break;
+                    }
+
                     File f = new File("archivos/" + archivo);
                     f.getParentFile().mkdirs();
                     if (!f.exists()) f.createNewFile();
+
+                    // Creamos y guardar el archivo abierto en el HashMap
+                    archivosAbiertos.put(archivo, new ArchivoAbierto(f));
                     salida.println("OK: Archivo '" + archivo + "' abierto");
                     break;
 
                 case "WRITE":
-                    // Formato esperado: "archivo.txt|contenido a escribir"
+                    // Formato recibido "archivo.txt|contenido a escribir"
                     String[] datos = partes[1].split("\\|", 2);
                     String nombreArchivo = datos[0];
                     String contenido = datos[1];
 
-                    FileWriter fw = new FileWriter("archivos/" + nombreArchivo, true);
-                    fw.write(contenido + "\n");
-                    fw.close();
+                    // Verificamos que el archivo esté abierto
+                    ArchivoAbierto archivoAbierto = archivosAbiertos.get(nombreArchivo);
+                    if (archivoAbierto == null) {
+                        salida.println("ERROR: Debe abrir el archivo primero con OPEN");
+                        break;
+                    }
+
+                    // Escribimos usando el writer ya abierto
+                    archivoAbierto.writer.write(contenido + "\n");
+                    archivoAbierto.writer.flush();  // Nos aseguramos que se escriba
 
                     salida.println("OK: Escrito en '" + nombreArchivo + "'");
                     break;
 
                 case "READ":
                     String archivoLeer = partes[1];
-                    File fl = new File("archivos/" + archivoLeer);
 
-                    if (!fl.exists()) {
-                        salida.println("ERROR: Archivo no existe");
+                    // Verificamos que el archivo esté abierto
+                    ArchivoAbierto archivoLectura = archivosAbiertos.get(archivoLeer);
+                    if (archivoLectura == null) {
+                        salida.println("ERROR: Debe abrir el archivo primero con OPEN ");
                         break;
                     }
 
-                    BufferedReader br = new BufferedReader(new FileReader(fl));
+                    // Leemos el archivo desde el File guardado
+                    BufferedReader br = new BufferedReader(new FileReader(archivoLectura.archivo));
                     salida.println("INICIO");
                     String linea;
                     while ((linea = br.readLine()) != null) {
@@ -124,13 +154,32 @@ public class ServidorArchivo {
                     break;
 
                 case "CLOSE":
-                    salida.println("OK: Archivo '" + partes[1] + "' cerrado");
+                    String archivoCerrar = partes[1];
+
+                    // Verificamos que el archivo esté abierto
+                    ArchivoAbierto archivoCerrado = archivosAbiertos.get(archivoCerrar);
+                    if (archivoCerrado == null) {
+                        salida.println("ERROR: Archivo '" + archivoCerrar + "' no está abierto");
+                        break;
+                    }
+
+                    // Cerramos realmente el archivo
+                    archivoCerrado.cerrar();
+                    archivosAbiertos.remove(archivoCerrar);
+
+                    salida.println("OK: Archivo '" + archivoCerrar + "' cerrado");
                     break;
 
                 case "DISCONNECT":
+                    // Cerramos todos los archivos abiertos
+                    for (ArchivoAbierto arch : archivosAbiertos.values()) {
+                        arch.cerrar();
+                    }
+                    archivosAbiertos.clear();
+
                     salida.println("OK: Hasta luego!");
                     socket.close();
-                    return true;  // Indicar que el cliente se desconectó
+                    return true;  // Indicamos que el cliente se desconectó
 
                 default:
                     salida.println("ERROR: Comando desconocido");
@@ -140,5 +189,23 @@ public class ServidorArchivo {
         }
 
         return false;  // El cliente sigue conectado
+    }
+
+    // Para mantener información de archivos abiertos
+    static class ArchivoAbierto {
+        File archivo;
+        FileWriter writer;
+
+        public ArchivoAbierto(File archivo) throws IOException {
+            this.archivo = archivo;
+            // Creamos el writer cuando se abre
+            this.writer = new FileWriter(archivo, true);
+        }
+
+        public void cerrar() throws IOException {
+            if (writer != null) {
+                writer.close();
+            }
+        }
     }
 }
